@@ -4990,6 +4990,61 @@
         }
       }
     },
+    "approval_protected_help" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Other programs can't modify this program while it runs."
+          }
+        }
+      }
+    },
+    "approval_show_less_button" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show Less"
+          }
+        }
+      }
+    },
+    "approval_show_more_button" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show More"
+          }
+        }
+      }
+    },
+    "approval_unprotected_help" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Other programs could have modified this program while it runs, so what's shown here may not be accurate."
+          }
+        }
+      }
+    },
+    "approval_use_password_button" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Use Password…"
+          }
+        }
+      }
+    },
     "auth_context_connecting_to_unknown_host" : {
       "extractionState" : "manual",
       "localizations" : {

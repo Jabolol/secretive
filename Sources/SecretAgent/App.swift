@@ -84,6 +84,10 @@ struct SecretAgent: App {
                     authenticationHandler.setPendingRequestHandler { @MainActor in
                         openWindow(value: PendingRequestsViewIdentifier())
                     }
+                    authenticationHandler.setApprovalHandler { @MainActor in
+                        NSApplication.shared.activate()
+                        openWindow(value: ApprovalViewIdentifier())
+                    }
 
                 }
                 .task {
@@ -105,6 +109,12 @@ struct SecretAgent: App {
         }
         .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentSize)
+        WindowGroup(for: ApprovalViewIdentifier.self) { _ in
+            ApprovalView(authenticationHandler: authenticationHandler)
+        }
+        .windowStyle(.hiddenTitleBar)
+        .windowResizability(.contentSize)
+        .windowLevel(.floating)
     }
 
     @ViewBuilder
@@ -117,3 +127,5 @@ struct SecretAgent: App {
 }
 
 struct PendingRequestsViewIdentifier: Codable, Hashable {}
+
+struct ApprovalViewIdentifier: Codable, Hashable {}
