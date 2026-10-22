@@ -49,8 +49,53 @@ extension SigningRequestTracer {
         var secCode: Unmanaged<SecCode>!
         let flags: SecCSFlags = [.considerExpiration, .enforceRevocationChecks]
         unsafe SecCodeCreateWithPID(pid, SecCSFlags(), &secCode)
-        let valid = unsafe SecCodeCheckValidity(secCode.takeRetainedValue(), flags, nil) == errSecSuccess
-        return SigningRequestProvenance.Process(pid: pid, processName: procName, appName: appName(for: pid), iconURL: iconURL(for: pid), path: path, validSignature: valid, parentPID: ppid)
+        let code = unsafe secCode.takeRetainedValue()
+        let valid = SecCodeCheckValidity(code, flags, nil) == errSecSuccess
+        return SigningRequestProvenance.Process(pid: pid, processName: procName, appName: appName(for: pid), iconURL: iconURL(for: pid), path: path, validSignature: valid, parentPID: ppid, processGroupID: unsafe pidAndNameInfo.kp_eproc.e_pgid, arguments: arguments(for: pid), workingDirectory: workingDirectory(for: pid), protected: isProtected(code))
+    }
+
+    /// Looks up the arguments a process ID was launched with.
+    /// - Parameter pid: The process ID to look up.
+    /// - Returns: The process's arguments, if they can be read.
+    func arguments(for pid: Int32) -> [String]? {
+        var name: [Int32] = [CTL_KERN, KERN_PROCARGS2, pid]
+        var length = 0
+        guard unsafe sysctl(&name, UInt32(name.count), nil, &length, nil, 0) == 0 else { return nil }
+        var buffer = [UInt8](repeating: 0, count: length)
+        guard unsafe sysctl(&name, UInt32(name.count), &buffer, &length, nil, 0) == 0 else { return nil }
+        let countSize = MemoryLayout<Int32>.size
+        guard length >= countSize else { return nil }
+        let argc = buffer.prefix(countSize).reversed().reduce(0) { $0 << 8 | Int($1) }
+        let arguments = buffer[countSize..<length]
+            .drop { $0 != 0 }
+            .drop { $0 == 0 }
+            .split(separator: 0, maxSplits: argc, omittingEmptySubsequences: false)
+        guard arguments.count > argc else { return nil }
+        return arguments.prefix(argc).map { String(decoding: $0, as: UTF8.self) }
+    }
+
+    /// Looks up the current working directory of a process ID.
+    /// - Parameter pid: The process ID to look up.
+    /// - Returns: The process's working directory, if it can be read.
+    func workingDirectory(for pid: Int32) -> String? {
+        var info = proc_vnodepathinfo()
+        let size = Int32(MemoryLayout<proc_vnodepathinfo>.size)
+        guard unsafe proc_pidinfo(pid, PROC_PIDVNODEPATHINFO, 0, &info, size) == size else { return nil }
+        return withUnsafeMutablePointer(to: &info.pvi_cdir.vip_path.0) { pointer in
+            unsafe String(cString: pointer)
+        }
+    }
+
+    /// Checks whether other processes are prevented from modifying a running process.
+    /// - Parameter code: The running code to check.
+    /// - Returns: A boolean describing whether or not the process is protected from modification.
+    func isProtected(_ code: SecCode) -> Bool {
+        var information: CFDictionary?
+        guard unsafe SecCodeCopySigningInformation(unsafeBitCast(code, to: SecStaticCode.self), SecCSFlags(rawValue: kSecCSDynamicInformation), &information) == errSecSuccess,
+              let rawStatus = (information as? [CFString: Any])?[kSecCodeInfoStatus] as? UInt32 else { return false }
+        let status = SecCodeStatus(rawValue: rawStatus)
+        guard status.contains(.valid), status.isDisjoint(with: [.debugged, .getTaskAllow]) else { return false }
+        return status.contains([.platform, .runtime]) || (!status.isDisjoint(with: [.platform, .runtime]) && !status.isDisjoint(with: [.forcedLibraryValidation, .requireLibraryValidation]))
     }
 
     /// Looks up the URL for the icon of a process ID, if it has one.
@@ -79,6 +124,14 @@ extension SigningRequestTracer {
         NSRunningApplication(processIdentifier: pid)?.localizedName
     }
 
+}
+
+//// from cs_blobs.h
+private extension SecCodeStatus {
+    static let getTaskAllow = SecCodeStatus(rawValue: 0x00000004)
+    static let forcedLibraryValidation = SecCodeStatus(rawValue: 0x00000010)
+    static let requireLibraryValidation = SecCodeStatus(rawValue: 0x00002000)
+    static let runtime = SecCodeStatus(rawValue: 0x00010000)
 }
 
 //// from SecTask.h
