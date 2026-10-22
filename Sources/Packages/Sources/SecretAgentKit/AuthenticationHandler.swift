@@ -87,7 +87,9 @@ public final class AuthenticationContext: AuthenticationContextProtocol {
 
 @MainActor public protocol AuthenticationHandlerProtocol: Observable {
     var batchableRequests: [[SignatureRequest]] { get }
+    var approval: Approval? { get }
     func setPendingRequestHandler(_ handler: @escaping () async throws -> Void)
+    func setApprovalHandler(_ handler: @escaping () async throws -> Void)
     func authenticatedContext(for request: SignatureRequest, context: any AuthenticationContextProtocol) async throws -> (any AuthenticationContextProtocol)?
     func persistAuthentication<SecretType: Secret>(secret: SecretType, forDuration duration: TimeInterval) async throws
     func requestAuthentication(for requests: Set<SignatureRequest>) async throws
@@ -97,11 +99,13 @@ public final class AuthenticationContext: AuthenticationContextProtocol {
 
     private var authenticatedContexts: [AnySecret: AuthenticationContext] = [:]
     private var waitingRequests: Set<SignatureRequest> = []
-    private var activeTask: Task<Bool, any Error>?
+    private var activeTask: Task<(any AuthenticationContextProtocol)?, any Error>?
     private var activeContext: (any AuthenticationContextProtocol)?
 
     private var lastBatchAuthPresentation: Set<SignatureRequest>?
     private var presentPendingAuth: (() async throws -> Void)?
+    private var presentApproval: (() async throws -> Void)?
+    public private(set) var approval: Approval?
     private let logger = Logger(subsystem: "com.maxgoedjen.secretive.secretagent", category: "AuthenticationHandler")
 
     public init() {
@@ -109,6 +113,10 @@ public final class AuthenticationContext: AuthenticationContextProtocol {
 
     public func setPendingRequestHandler(_ handler: @escaping () async throws -> Void) {
         self.presentPendingAuth = handler
+    }
+
+    public func setApprovalHandler(_ handler: @escaping () async throws -> Void) {
+        self.presentApproval = handler
     }
 
     public func authenticatedContext(for request: SignatureRequest, context: any AuthenticationContextProtocol) async throws -> (any AuthenticationContextProtocol)? {
@@ -140,21 +148,34 @@ public final class AuthenticationContext: AuthenticationContextProtocol {
 
         // Hold onto the task and context so we can cancel them when prsenting pending.
         activeContext = context
-        let currentTask = Task<Bool, any Error> {
+        let currentTask = Task<(any AuthenticationContextProtocol)?, any Error> {
             logger.log("Beginning individual auth prompt")
-            let result = (try? await context.evaluate(requireBiometrics: request.secret.authenticationRequirement == .biometryCurrent)) ?? false
+            let result = await approve(request, context: context)
             logger.log("Ended individual auth prompt")
             return result
         }
         activeTask = currentTask
-        let result = try? await activeTask?.value
-        if result == false && activeTask?.isCancelled == false {
-            waitingRequests.remove(request)
-            throw CancellationError()
-        } else if currentTask.isCancelled {
+        let result = (try? await currentTask.value) ?? nil
+        if currentTask.isCancelled {
             return try await waitUntilRequestActedOn(request)
         }
-        return context
+        guard let result else {
+            waitingRequests.remove(request)
+            throw CancellationError()
+        }
+        return result
+    }
+
+    func approve(_ request: SignatureRequest, context: any AuthenticationContextProtocol) async -> (any AuthenticationContextProtocol)? {
+        guard let presentApproval else {
+            let authenticated = (try? await context.evaluate(requireBiometrics: request.secret.authenticationRequirement == .biometryCurrent)) ?? false
+            return authenticated ? context : nil
+        }
+        let approval = Approval(request: request, context: context)
+        self.approval = approval
+        defer { self.approval = nil }
+        try? await presentApproval()
+        return await approval.decision()
     }
 
     func waitUntilRequestActedOn(_ request: SignatureRequest) async throws -> any AuthenticationContextProtocol {

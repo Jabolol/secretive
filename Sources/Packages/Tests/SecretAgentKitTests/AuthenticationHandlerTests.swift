@@ -2,7 +2,7 @@ import Testing
 import Foundation
 import LocalAuthentication
 import SecretKit
-import SecretAgentKit
+@testable import SecretAgentKit
 import SSHProtocolKit
 
 public struct TestSecret: Secret {
@@ -122,17 +122,15 @@ public struct TestSecret: Secret {
         }
         let contextA = TestContext(authenticationRequirement: .presenceRequired, testEvaluationResult: true, approval: .manual)
         let contextB = TestContext(authenticationRequirement: .notRequired, testEvaluationResult: true)
-        var unauthenticatedResult = false
         Task {
-            Task {
-                _ = try? await handler.authenticatedContext(for: .init(secret: .init(contextB.secret), provenance: .test, target: nil), context: contextB)
-                unauthenticatedResult = true
-            }
             _ = try? await handler.authenticatedContext(for: .init(secret: .init(contextA.secret), provenance: .test, target: nil), context: contextA)
         }
-        try await Task.sleep(for: .milliseconds(10))
+        while handler.batchableRequests.isEmpty {
+            await Task.yield()
+        }
+        let unauthenticatedResult = try await handler.authenticatedContext(for: .init(secret: .init(contextB.secret), provenance: .test, target: nil), context: contextB)
         #expect(contextA.evaluationResult == nil)
-        #expect(unauthenticatedResult)
+        #expect(unauthenticatedResult != nil)
         #expect(!contextA.canceled)
         #expect(!contextB.canceled)
         #expect(!calledPresentPending)
@@ -164,6 +162,22 @@ public struct TestSecret: Secret {
 
     @Test func batching() async throws {
 
+    }
+
+    @Test func deniedApprovalFails() async throws {
+        handler.setApprovalHandler { }
+        let secret = TestSecret(attributes: .init(keyType: .ecdsa256, authentication: .presenceRequired))
+        let request = SignatureRequest(secret: AnySecret(secret), provenance: .test, target: nil)
+        Task {
+            while handler.approval == nil {
+                await Task.yield()
+            }
+            handler.approval?.deny()
+        }
+        await #expect(throws: CancellationError.self) {
+            try await handler.authenticatedContext(for: request, context: AuthenticationContext(secret: secret, requests: [request]))
+        }
+        #expect(handler.approval == nil)
     }
 
 }

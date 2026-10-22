@@ -20,41 +20,7 @@ struct PendingRequestsView: View {
                 MultilineInfoView {
                     if let first = group.element.first {
                         HStack {
-                            HStack {
-                                if let iconURL = first.provenance.origin.iconURL {
-                                    Image(nsImage: .init(byReferencing: iconURL))
-                                        .resizable()
-                                        .aspectRatio(contentMode: .fit)
-                                        .frame(width: 50)
-                                } else {
-                                    Image(systemName: "app.grid")
-                                        .resizable()
-                                        .aspectRatio(contentMode: .fit)
-                                        .fontWeight(.regular)
-                                        .frame(width: 50)
-                                }
-                                VStack(alignment: .leading) {
-                                    Text(first.provenance.origin.displayName)
-                                        .font(.subheadline)
-                                    Text(first.secret.name)
-                                        .font(.headline)
-                                    switch first.target {
-                                    case .connection(let payload):
-                                        if let host = payload.host {
-                                            Text(.authContextConnectingToUsernameAndHost(username: payload.username, host: host))
-                                                .font(.caption2)
-                                        } else {
-                                            Text(.authContextConnectingToUnknownHost)
-                                                .font(.caption2)
-                                        }
-                                    case .signature(let payload):
-                                        Text(.authContextSigningForNamespace(namespace: payload.namespace))
-                                            .font(.caption2)
-                                    default:
-                                        EmptyView()
-                                    }
-                                }
-                            }
+                            RequestHeaderView(request: first)
                             Spacer()
                             VStack {
                                 Button(.pendingRequestsReviewBatchButton) {
@@ -96,9 +62,54 @@ struct PendingRequestsView: View {
 
 }
 
+struct RequestHeaderView: View {
+
+    let request: SignatureRequest
+
+    var body: some View {
+        HStack {
+            if let iconURL = request.provenance.origin.iconURL {
+                Image(nsImage: .init(byReferencing: iconURL))
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 50, height: 50)
+            } else {
+                Image(systemName: "app.grid")
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .fontWeight(.regular)
+                    .frame(width: 50, height: 50)
+            }
+            VStack(alignment: .leading) {
+                Text(request.provenance.origin.displayName)
+                    .font(.subheadline)
+                Text(request.secret.name)
+                    .font(.headline)
+                switch request.target {
+                case .connection(let payload):
+                    if let host = payload.host {
+                        Text(.authContextConnectingToUsernameAndHost(username: payload.username, host: host))
+                            .font(.caption2)
+                    } else {
+                        Text(.authContextConnectingToUnknownHost)
+                            .font(.caption2)
+                    }
+                case .signature(let payload):
+                    Text(.authContextSigningForNamespace(namespace: payload.namespace))
+                        .font(.caption2)
+                default:
+                    EmptyView()
+                }
+            }
+        }
+    }
+
+}
+
 private struct TestHandler: AuthenticationHandlerProtocol {
 
     var batchableRequests: [[SignatureRequest]] = []
+    var approval: Approval? = nil
 
     func requestAuthentication(for requests: Set<SignatureRequest>) async throws {
 
@@ -109,6 +120,10 @@ private struct TestHandler: AuthenticationHandlerProtocol {
     }
 
     func setPendingRequestHandler(_ handler: @escaping () async throws -> Void) {
+
+    }
+
+    func setApprovalHandler(_ handler: @escaping () async throws -> Void) {
 
     }
     
